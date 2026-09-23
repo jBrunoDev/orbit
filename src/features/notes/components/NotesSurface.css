@@ -1,0 +1,12 @@
+.notes-content-input {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+.notes-content-input:focus {
+  border: 0 !important;
+  box-shadow: none;
+}

@@ -1,0 +1,7 @@
+{
+  "format": "orbit-icon-bundle",
+  "version": 1,
+  "offline": true,
+  "fallback": "shape",
+  "icons": ["client", "api", "loadBalancer", "database", "cache", "worker", "cdn", "queue", "python", "typescript", "storage", "service"]
+}
