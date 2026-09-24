@@ -1,4 +1,26 @@
 import type { CatalogItem } from "./types";
+import { officialTemplates } from "../templates/templateManifest";
+
+const noteContent: Record<string, string> = {
+  "daily-planner": "Adicione tarefas, prioridades e próximos passos aqui.",
+  "study-notes": "Registre conceitos, exemplos e um resumo com suas próprias palavras.",
+  "meeting-notes": "Registre decisões, responsáveis e próximos passos da reunião.",
+};
+
+const noteTemplateItems: CatalogItem[] = officialTemplates
+  .filter((template) => Object.prototype.hasOwnProperty.call(noteContent, template.id))
+  .map((template) => ({
+    type: `note-${template.id}`,
+    label: template.name,
+    category: "Notes",
+    icon: "note",
+    color: template.id === "daily-planner" ? "purple" : template.id === "study-notes" ? "blue" : "green",
+    description: template.description,
+    ports: [],
+    simulationDefaults: {},
+    defaultSize: { width: template.id === "daily-planner" ? 560 : 480, height: template.id === "daily-planner" ? 460 : 340 },
+    defaultData: template.seed.components[0]?.data ?? { canvasKind: "note", noteTemplate: template.id, content: noteContent[template.id] ?? "" },
+  }));
 
 export const orbitCoreItems: CatalogItem[] = [
   { type: "client", label: "Client", category: "Clients", icon: "client", color: "purple", description: "Web / Mobile", ports: [{ key: "http-out", direction: "output", protocol: "http" }], simulationDefaults: {} },
@@ -21,5 +43,5 @@ export const orbitCoreItems: CatalogItem[] = [
   { type: "kubernetes-cluster", label: "Kubernetes Cluster", category: "Tech/Infra", icon: "loadBalancer", color: "blue", description: "Container orchestration", tags: ["Kubernetes", "DevOps"], ports: [{ key: "http-in", direction: "input", protocol: "http" }, { key: "http-out", direction: "output", protocol: "http" }], simulationDefaults: {} },
 ];
 
-export const catalogItems = orbitCoreItems;
-export default orbitCoreItems;
+export const catalogItems = [...orbitCoreItems.slice(0, 3), ...noteTemplateItems, ...orbitCoreItems.slice(3)];
+export default catalogItems;

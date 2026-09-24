@@ -1,0 +1,6 @@
+/* Each Templates pane scrolls inside the fixed shared application shell. */
+.template-inspector {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}

@@ -189,6 +189,10 @@ function App() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [projectToTrash, setProjectToTrash] = useState<LocalProject>();
+  const [isTrashing, setIsTrashing] = useState(false);
+  const [trashError, setTrashError] = useState("");
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<string>();
   const [projectName, setProjectName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -227,14 +231,16 @@ function App() {
         event.preventDefault();
         setIsSearchOpen(true);
       }
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !isTrashing) {
         setIsCreateOpen(false);
         setIsSearchOpen(false);
+        setProjectToTrash(undefined);
+        setOpenProjectMenuId(undefined);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [isTrashing]);
   useEffect(() => {
     if (isCreateOpen) window.setTimeout(() => projectInput.current?.focus(), 0);
   }, [isCreateOpen]);
@@ -248,7 +254,7 @@ function App() {
   }
   function navigateFromSidebar(section: string) {
     if (section === "home") return;
-    if (section === "canvas" || section === "notes") {
+    if (section === "canvas" || section === "notes" || section === "calendar" || section === "docs") {
       const latestProject = projects[0];
       if (latestProject) window.location.hash = `${section}/${encodeURIComponent(latestProject.id)}`;
       else openCreateProject();
@@ -284,6 +290,29 @@ function App() {
       );
     } finally {
       setIsCreating(false);
+    }
+  }
+  function openTrashDialog(project: LocalProject) {
+    setOpenProjectMenuId(undefined);
+    setTrashError("");
+    setProjectToTrash(project);
+  }
+  async function trashProject() {
+    if (!projectToTrash || isTrashing) return;
+    if (!isTauriAvailable()) {
+      setTrashError("Abra o Orbit pelo aplicativo desktop para mover este Project à lixeira.");
+      return;
+    }
+    setIsTrashing(true);
+    setTrashError("");
+    try {
+      await invoke("trash_local_project", { projectId: projectToTrash.id });
+      setProjects((current) => current.filter((project) => project.id !== projectToTrash.id));
+      setProjectToTrash(undefined);
+    } catch (reason) {
+      setTrashError(reason instanceof Error ? reason.message : "Não foi possível mover o Project à lixeira.");
+    } finally {
+      setIsTrashing(false);
     }
   }
   return (
@@ -487,13 +516,18 @@ function App() {
                           {relativeTime(project.updatedAt)}
                         </p>
                       </div>
-                      <button
-                        className="more-button"
-                        aria-label={`Mais ações para ${project.name}`}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <Icon name="more" />
-                      </button>
+                      <div className="project-actions-menu">
+                        <button
+                          className="more-button"
+                          aria-label={`Mais ações para ${project.name}`}
+                          aria-expanded={openProjectMenuId === project.id}
+                          aria-controls={`project-menu-${project.id}`}
+                          onClick={(event) => { event.stopPropagation(); setOpenProjectMenuId((current) => current === project.id ? undefined : project.id); }}
+                        >
+                          <Icon name="more" />
+                        </button>
+                        {openProjectMenuId === project.id && <div id={`project-menu-${project.id}`} className="project-menu" role="menu"><button type="button" role="menuitem" onClick={(event) => { event.stopPropagation(); openTrashDialog(project); }}>Mover para lixeira</button></div>}
+                      </div>
                     </div>
                   </article>
                 </li>
@@ -561,6 +595,21 @@ function App() {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {projectToTrash && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !isTrashing) setProjectToTrash(undefined); }}>
+          <section className="dialog trash-project-dialog" role="dialog" aria-modal="true" aria-labelledby="trash-project-title" aria-describedby="trash-project-description">
+            <button className="dialog-close" onClick={() => setProjectToTrash(undefined)} disabled={isTrashing} aria-label="Fechar"><Icon name="close" /></button>
+            <p className="eyebrow">LIXEIRA LOCAL</p>
+            <h2 id="trash-project-title">Mover {projectToTrash.name} para a lixeira?</h2>
+            <p id="trash-project-description">O Project sairá da Home, mas seus arquivos serão mantidos localmente na lixeira. Esta ação não apaga os dados de forma permanente.</p>
+            {trashError && <p className="form-error" role="alert">{trashError}</p>}
+            <div className="dialog-actions">
+              <button type="button" className="button button-secondary" onClick={() => setProjectToTrash(undefined)} disabled={isTrashing} autoFocus>Cancelar</button>
+              <button type="button" className="button button-danger" onClick={() => void trashProject()} disabled={isTrashing}>{isTrashing ? "Movendo..." : "Mover para lixeira"}</button>
+            </div>
           </section>
         </div>
       )}

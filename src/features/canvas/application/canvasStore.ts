@@ -52,6 +52,18 @@ type Snapshot = {
   visuals: PersistedVisual[];
 };
 
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const normalizeComponents = (components: PersistedComponent[]) =>
+  components.map((component) => ({
+    ...component,
+    data: asRecord(component.data),
+    ports: component.ports.map((port) => ({ ...port, data: asRecord(port.data) })),
+  }));
+
 const asNodes = (components: PersistedComponent[], projectId: string): Node[] =>
   components.map((component) => ({
     id: component.id,
@@ -81,7 +93,7 @@ type CanvasState = {
   selectedId?: string;
   loading: boolean;
   error?: string;
-  load: (projectId: string) => Promise<void>;
+  load: (projectId: string, canvasId?: string) => Promise<void>;
   addComponent: (
     projectId: string,
     definition: ComponentDefinition,
@@ -94,6 +106,11 @@ type CanvasState = {
     projectId: string,
     component: PersistedComponent,
   ) => Promise<void>;
+  duplicateComponent: (
+    projectId: string,
+    component: PersistedComponent,
+    offset?: { x: number; y: number },
+  ) => Promise<void>;
   updateVisual: (projectId: string, visual: PersistedVisual) => Promise<void>;
   removeComponent: (projectId: string, componentId: string) => Promise<void>;
   removeVisual: (projectId: string, visualId: string) => Promise<void>;
@@ -101,9 +118,10 @@ type CanvasState = {
 };
 
 function applySnapshot(snapshot: Snapshot, projectId: string) {
+  const components = normalizeComponents(snapshot.components);
   return {
     canvasId: snapshot.canvas.id,
-    nodes: [...asNodes(snapshot.components, projectId), ...asVisualNodes(snapshot.visuals)],
+    nodes: [...asNodes(components, projectId), ...asVisualNodes(snapshot.visuals)],
     edges: asEdges(snapshot.connections),
     error: undefined,
   };
@@ -114,7 +132,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   edges: [],
   loading: true,
   select: (selectedId) => set({ selectedId }),
-  load: async (projectId) => {
+  load: async (projectId, canvasId) => {
     set({ loading: true, error: undefined });
     if (!isTauriAvailable()) {
       set({
@@ -125,7 +143,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
     try {
       set({
-        ...applySnapshot(await invoke<Snapshot>("load_canvas", { projectId }), projectId),
+        ...applySnapshot(await invoke<Snapshot>("load_canvas", { projectId, canvasId }), projectId),
         loading: false,
       });
     } catch (error) {
@@ -151,10 +169,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         description: definition.description,
         x: offset.x,
         y: offset.y,
-        width: 180,
-        height: 86,
+        width: definition.defaultSize?.width ?? 180,
+        height: definition.defaultSize?.height ?? 86,
         color: definition.color,
-        data: {},
+        data: definition.defaultData ?? {},
         ports: definition.ports.map((port) => ({ ...port, data: {} })),
       },
     });
@@ -226,6 +244,35 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         node.id === component.id ? { ...node, data: component } : node,
       ),
     }));
+  },
+  duplicateComponent: async (projectId, component, offset = { x: 32, y: 32 }) => {
+    const { canvasId } = get();
+    if (!canvasId) return;
+    const snapshot = await invoke<Snapshot>("create_canvas_component", {
+      input: {
+        projectId,
+        canvasId,
+        componentType: component.componentType,
+        label: component.label,
+        description: component.description,
+        x: component.x + offset.x,
+        y: component.y + offset.y,
+        width: component.width,
+        height: component.height,
+        color: component.color,
+        data: component.data,
+        ports: component.ports.map((port) => ({
+          key: port.key,
+          direction: port.direction,
+          protocol: port.protocol,
+          data: port.data,
+        })),
+      },
+    });
+    const created = snapshot.components.find(
+      (candidate) => candidate.x === component.x + offset.x && candidate.y === component.y + offset.y,
+    );
+    set({ ...applySnapshot(snapshot, projectId), selectedId: created?.id });
   },
   updateVisual: async (projectId, visual) => {
     const { canvasId } = get();

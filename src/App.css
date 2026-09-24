@@ -14,3 +14,6 @@
 .search-trigger>.icon{flex:0 0 auto}.search-trigger>span:not(.icon){flex:1;font-size:14px}.more-button{display:none}
 .window-controls{display:none}
 .search-trigger kbd{display:none}
+
+/* Ações do Project recente. */
+.more-button{display:grid;width:25px;height:25px;place-items:center;padding:0;border-radius:6px;background:transparent;color:var(--muted)}.more-button:hover,.more-button:focus-visible{background:var(--raised);color:var(--text)}.project-actions-menu{position:relative;z-index:2}.project-menu{position:absolute;right:0;top:30px;min-width:160px;padding:var(--s2);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--raised);box-shadow:var(--shadow)}.project-menu button{width:100%;border:0;border-radius:6px;background:transparent;color:var(--danger);padding:var(--s2) var(--s3);font:inherit;font-size:12px;text-align:left}.project-menu button:hover,.project-menu button:focus-visible{background:var(--surface);outline:none}.button-danger{border-color:var(--danger);background:var(--surface);color:var(--danger)}.button-danger:hover{background:var(--raised)}.trash-project-dialog .eyebrow{color:var(--danger)}

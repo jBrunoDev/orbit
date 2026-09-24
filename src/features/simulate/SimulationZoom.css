@@ -1,0 +1,8 @@
+.simulation-board {
+  cursor: zoom-in;
+}
+
+.simulation-board .simulation-node,
+.simulation-board svg {
+  transition: transform 120ms ease, left 120ms ease, top 120ms ease;
+}

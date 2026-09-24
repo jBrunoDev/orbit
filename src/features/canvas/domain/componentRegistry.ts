@@ -1,7 +1,7 @@
 import { ComponentType, PortDirection, PortProtocol } from "./types";
 
 export type PortTemplate = { key: string; direction: PortDirection; protocol: PortProtocol };
-export type ComponentDefinition = { type: string; label: string; category: string; icon: string; color: string; description: string; ports: PortTemplate[]; simulationDefaults: Record<string, unknown> };
+export type ComponentDefinition = { type: string; label: string; category: string; icon: string; color: string; description: string; ports: PortTemplate[]; simulationDefaults: Record<string, unknown>; defaultSize?: { width: number; height: number }; defaultData?: Record<string, unknown> };
 
 export const componentRegistry: Record<ComponentType, ComponentDefinition> = {
   client: { type: "client", label: "Client", category: "Entry", icon: "client", color: "purple", description: "Web / Mobile", ports: [{ key: "http-out", direction: "output", protocol: "http" }], simulationDefaults: {} },

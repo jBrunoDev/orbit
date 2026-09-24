@@ -64,14 +64,14 @@ export default function ComponentsPage() {
       window.location.hash = "";
       return;
     }
-    if (section === "canvas") {
+    if (section === "canvas" || section === "notes" || section === "calendar" || section === "docs") {
       if (!isTauriAvailable()) {
         window.location.hash = "";
         return;
       }
       try {
         const projects = await invoke<LocalProject[]>("list_local_projects");
-        window.location.hash = projects[0] ? `canvas/${encodeURIComponent(projects[0].id)}` : "";
+        window.location.hash = projects[0] ? `${section}/${encodeURIComponent(projects[0].id)}` : "";
       } catch {
         window.location.hash = "";
       }

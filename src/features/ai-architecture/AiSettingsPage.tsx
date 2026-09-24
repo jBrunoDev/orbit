@@ -1,0 +1,11 @@
+import { useEffect, useState } from "react";
+import { AppShell } from "../../shared/AppShell";
+import { aiGateway, type AiSettings } from "./aiGateway";
+import "./AiSettingsPage.css";
+
+export default function AiSettingsPage() {
+  const [settings, setSettings] = useState<AiSettings>(); const [key, setKey] = useState(""); const [github, setGithub] = useState(""); const [message, setMessage] = useState("");
+  useEffect(() => { void aiGateway.settings().then(setSettings).catch((error) => setMessage(error.message)); }, []);
+  const save = async () => { if (!settings) return; try { if (key) await aiGateway.saveOpenAiKey(key); if (github) await aiGateway.saveGithubToken(github); setSettings(await aiGateway.saveSettings(settings.enabled, settings.model)); setKey(""); setGithub(""); setMessage("Configurações salvas no dispositivo."); } catch (error) { setMessage(error instanceof Error ? error.message : "Não foi possível salvar."); } };
+  return <AppShell activeSection="settings" onNavigate={(section) => { window.location.hash = section === "home" ? "" : `#${section}`; }}><main className="ai-settings"><p className="ai-eyebrow">CONFIGURAÇÃO LOCAL</p><h1>IA e análise de arquitetura</h1><p>As chaves ficam apenas no cofre seguro do sistema. Nunca são gravadas no projeto ou no SQLite.</p>{settings && <section className="ai-card"><label><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /> Habilitar IA neste dispositivo</label><label>Provider<input value="OpenAI" disabled /></label><label>Modelo<input value={settings.model} onChange={(event) => setSettings({ ...settings, model: event.target.value })} /></label><label>Chave da OpenAI <small>{settings.hasOpenaiApiKey ? "configurada" : "ausente"}</small><input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="Cole uma nova chave para substituir" /></label><label>Token GitHub opcional <small>{settings.hasGithubToken ? "configurado" : "ausente"}</small><input type="password" value={github} onChange={(event) => setGithub(event.target.value)} placeholder="Fine grained, somente leitura" /></label><button onClick={() => void save()}>Salvar configurações</button></section>}{message && <p className="ai-message">{message}</p>}</main></AppShell>;
+}

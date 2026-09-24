@@ -20,4 +20,6 @@ export type CatalogItem = {
   iconLoader?: () => Promise<string>;
   ports: CatalogPort[];
   simulationDefaults: Record<string, unknown>;
+  defaultSize?: { width: number; height: number };
+  defaultData?: Record<string, unknown>;
 };

@@ -1,0 +1,22 @@
+.app-brand-logo {
+  display: block;
+  width: 144px;
+  height: auto;
+}
+
+.app-brand-symbol {
+  display: none;
+}
+
+@media (max-width: 1250px) {
+  .app-brand-logo {
+    display: none;
+  }
+
+  .app-brand-symbol {
+    display: block;
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+  }
+}

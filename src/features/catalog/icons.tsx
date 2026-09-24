@@ -39,6 +39,8 @@ function iconPaths(icon: string): ReactNode {
       return <><rect {...sharedStroke} x="7" y="7" width="34" height="34" rx="4" /><path {...sharedStroke} d="M15 17h13M21.5 17v14M28 23c1.5-1.4 6-1.1 6 1.5 0 3.8-7 1.9-7 5.5 0 2.5 3.9 2.5 6.5.8" /></>;
     case "storage":
       return <><path {...sharedStroke} d="m24 6 16 9v18l-16 9-16-9V15l16-9Z" /><path {...sharedStroke} d="m8 15 16 9 16-9M24 24v18" /></>;
+    case "note":
+      return <><path {...sharedStroke} d="M12 6h18l6 6v30H12z" /><path {...sharedStroke} d="M30 6v8h8M17 22h14M17 29h14M17 36h9" /></>;
     case "service":
     default:
       return <><rect {...sharedStroke} x="8" y="11" width="32" height="26" rx="5" /><path {...sharedStroke} d="M15 18h18M15 24h11M15 30h15" /><circle fill="currentColor" cx="34" cy="24" r="1.5" /></>;
