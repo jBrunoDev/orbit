@@ -1,4 +1,5 @@
 import catalogItems from "./catalog";
+import { awsServiceItems } from "./awsServices";
 import type { CatalogItem } from "./types";
 
 export interface CatalogRepository {
@@ -46,3 +47,14 @@ export class InMemoryCatalogRepository implements CatalogRepository {
 }
 
 export const defaultCatalogRepository = new InMemoryCatalogRepository();
+
+export const awsLibraryItems: CatalogItem[] = awsServiceItems.map((item) => ({ ...item, category: "AWS" }));
+const allCatalogItems = [...catalogItems, ...awsLibraryItems];
+
+export function getCatalogItemByType(type: string) {
+  return allCatalogItems.find((item) => item.type === type);
+}
+
+export function createCanvasCatalogRepository(awsEnabled: boolean) {
+  return new InMemoryCatalogRepository(awsEnabled ? allCatalogItems : catalogItems);
+}

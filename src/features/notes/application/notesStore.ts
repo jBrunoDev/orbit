@@ -3,7 +3,7 @@ import { isTauriAvailable } from "../../../shared/tauri";
 import type { Note, NoteFilter } from "../domain/types";
 import { notesGateway } from "../infrastructure/notesGateway";
 
-type NotesState = { notes: Note[]; selectedId?: string; filter: NoteFilter; query: string; loading: boolean; error?: string; load: (projectId: string) => Promise<void>; create: (projectId: string) => Promise<void>; save: (projectId: string, note: Note) => Promise<void>; archive: (projectId: string, noteId: string, archived: boolean) => Promise<void>; pin: (projectId: string, noteId: string) => Promise<void>; setFilter: (filter: NoteFilter) => void; setQuery: (query: string) => void; select: (id?: string) => void };
+type NotesState = { notes: Note[]; selectedId?: string; filter: NoteFilter; query: string; loading: boolean; error?: string; load: (projectId: string) => Promise<void>; create: (projectId: string) => Promise<void>; save: (projectId: string, note: Note) => Promise<void>; archive: (projectId: string, noteId: string, archived: boolean) => Promise<void>; trash: (noteId: string) => Promise<void>; pin: (projectId: string, noteId: string) => Promise<void>; setFilter: (filter: NoteFilter) => void; setQuery: (query: string) => void; select: (id?: string) => void };
 
 export const useNotesStore = create<NotesState>((set, get) => ({
   notes: [], filter: "all", query: "", loading: true,
@@ -12,5 +12,6 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   create: async (projectId) => { const note = await notesGateway.create(projectId); set((state) => ({ notes: [note, ...state.notes], selectedId: note.id, filter: "all" })); },
   save: async (projectId, note) => { const saved = await notesGateway.update(projectId, note); set((state) => ({ notes: state.notes.map((item) => item.id === saved.id ? saved : item) })); },
   archive: async (projectId, noteId, archived) => { await notesGateway.archive(projectId, noteId, archived); await get().load(projectId); },
+  trash: async (noteId) => { await notesGateway.trash(noteId); set((state) => { const removedIndex = state.notes.findIndex((note) => note.id === noteId); const notes = state.notes.filter((note) => note.id !== noteId); const selectedId = state.selectedId === noteId ? notes[removedIndex]?.id ?? notes[removedIndex - 1]?.id : state.selectedId; return { notes, selectedId }; }); },
   pin: async (projectId, noteId) => { await notesGateway.togglePin(projectId, noteId); await get().load(projectId); },
 }));

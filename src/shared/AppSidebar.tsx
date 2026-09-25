@@ -11,7 +11,6 @@ import "./ProfileSidebar.css";
 const navigation: { id: string; label: string; icon: OrbitIconName }[] = [
   { id: "home", label: "Home", icon: "home" },
   { id: "canvas", label: "Canvas", icon: "canvas" },
-  { id: "notes", label: "Notes", icon: "notes" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "templates", label: "Templates", icon: "templates" },
   { id: "components", label: "Components", icon: "components" },

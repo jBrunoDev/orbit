@@ -10,3 +10,133 @@
   border: 0 !important;
   box-shadow: none;
 }
+
+.notes-rich-editor {
+  min-height: 0;
+  overflow: auto;
+  outline: 0;
+  padding: 18px;
+  border: 1px solid var(--border, #263244);
+  border-radius: 10px;
+  background: var(--surface, #0c121c);
+  color: var(--text-primary, #edf2ff);
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.notes-rich-editor:focus {
+  border-color: var(--accent-strong, #9c5cff);
+}
+
+.notes-rich-editor [data-asset-id] {
+  display: block;
+  white-space: normal;
+}
+
+.notes-layout {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.notes-editor {
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+.notes-editor .notes-toolbar {
+  grid-row: 3;
+}
+
+.notes-editor footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 8px 0;
+  background: var(--bg);
+}
+
+.notes-toolbar button.active {
+  background: rgba(156, 92, 255, 0.22);
+  color: #e7d4ff;
+}
+
+.notes-prosemirror {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border, #263244);
+  border-radius: 10px;
+  background: var(--surface, #0c121c);
+  color: var(--text-primary, #edf2ff);
+  outline: 0;
+  line-height: 1.6;
+}
+
+.notes-prosemirror:focus {
+  border-color: var(--accent-strong, #9c5cff);
+}
+
+.notes-prosemirror h2 { margin: 22px 0 10px; font-size: 1.45rem; }
+.notes-prosemirror p { margin: 0 0 12px; }
+.notes-prosemirror pre { overflow: auto; padding: 12px; border-radius: 8px; background: #080d14; }
+.notes-prosemirror ul[data-type="taskList"] { padding: 0; list-style: none; }
+.notes-prosemirror ul[data-type="taskList"] li { display: flex; gap: 8px; }
+.notes-prosemirror ul[data-type="taskList"] li > label { margin-top: 4px; }
+
+.notes-image-node {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: 12px 0;
+}
+
+.notes-image-node.is-selected {
+  outline: 2px solid var(--accent-strong, #9c5cff);
+  outline-offset: 3px;
+}
+
+.notes-image-node:hover .notes-image-delete,
+.notes-image-node.is-selected .notes-image-delete {
+  display: block;
+}
+
+.notes-image-delete {
+  display: none;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(8, 13, 20, 0.88);
+  color: #fff;
+  padding: 6px 8px;
+}
+.notes-markdown {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--border, #263244);
+  border-radius: 10px;
+  background: var(--surface, #0c121c);
+  color: var(--text-primary, #edf2ff);
+}
+
+.notes-markdown .module-asset-image,
+.docs-markdown .module-asset-image {
+  display: block;
+  max-width: 100%;
+  max-height: 520px;
+  margin: 14px 0;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.module-asset-unavailable,
+.module-asset-loading {
+  display: inline-block;
+  padding: 8px 10px;
+  color: var(--text-muted, #9aa7bb);
+  border: 1px dashed var(--border, #263244);
+  border-radius: 6px;
+}

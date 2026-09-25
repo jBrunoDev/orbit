@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CatalogIcon } from "../catalog/icons";
-import { defaultCatalogRepository } from "../catalog/repository";
+import { getCatalogItemByType } from "../catalog/repository";
 import type { PersistedComponent, PersistedPort } from "./application/canvasStore";
 import { useCanvasStore } from "./application/canvasStore";
 
@@ -127,13 +127,13 @@ function NoteNode({ component, selected }: { component: OrbitNodeData; selected?
 export function OrbitNode({ data, selected }: NodeProps) {
   const component = data as unknown as OrbitNodeData;
   if (component.data?.canvasKind === "note") return <NoteNode component={component} selected={selected} />;
-  const catalogItem = defaultCatalogRepository.getItemByType(component.catalogType ?? component.componentType);
+  const catalogItem = getCatalogItemByType(component.catalogType ?? component.componentType);
   const updateComponent = useCanvasStore((state) => state.updateComponent);
   const save = (field: "label" | "description", value: string) => {
     if (component.projectId) void updateComponent(component.projectId, { ...component, [field]: value });
   };
   return <article className={`orbit-flow-node ${selected ? "selected" : ""} tone-${component.color}`}>
-    <CatalogIcon icon={catalogItem?.icon} className={`tone-${component.color}`} />
+    {catalogItem?.assetPath ? <img className="canvas-catalog-icon" src={catalogItem.assetPath} alt="" /> : <CatalogIcon icon={catalogItem?.icon} className={`tone-${component.color}`} />}
     <div className="orbit-node-copy">
       <EditableText value={component.label} className="orbit-node-title" onSave={(value) => save("label", value)} />
       <EditableText value={component.description} className="orbit-node-subtitle" onSave={(value) => save("description", value)} />

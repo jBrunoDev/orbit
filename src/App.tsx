@@ -7,7 +7,6 @@ import "./App.css";
 type IconName =
   | "home"
   | "canvas"
-  | "notes"
   | "templates"
   | "components"
   | "simulate"
@@ -86,7 +85,6 @@ const iconFiles = import.meta.glob<string>("../assets/icons/*.svg", {
 const iconAssets: Record<Exclude<IconName, "close">, string> = {
   home: iconFiles["../assets/icons/nav-home.svg"],
   canvas: iconFiles["../assets/icons/nav-canvas.svg"],
-  notes: iconFiles["../assets/icons/nav-notes.svg"],
   templates: iconFiles["../assets/icons/nav-templates.svg"],
   components: iconFiles["../assets/icons/nav-components.svg"],
   simulate: iconFiles["../assets/icons/nav-simulate.svg"],
@@ -254,7 +252,7 @@ function App() {
   }
   function navigateFromSidebar(section: string) {
     if (section === "home") return;
-    if (section === "canvas" || section === "notes" || section === "calendar" || section === "docs") {
+    if (section === "canvas" || section === "calendar" || section === "docs") {
       const latestProject = projects[0];
       if (latestProject) window.location.hash = `${section}/${encodeURIComponent(latestProject.id)}`;
       else openCreateProject();
@@ -328,7 +326,7 @@ function App() {
             aria-label="Pesquisar no Orbit, atalho Control K"
           >
             <Icon name="search" />
-            <span>Search canvases, notes, templates...</span>
+            <span>Search canvases, templates...</span>
             <kbd>⌘ K</kbd>
           </button>
           <button
@@ -479,7 +477,7 @@ function App() {
             <div className="state-panel">
               <strong>Seu espaço está pronto para começar.</strong>
               <span>
-                Crie um Project local para manter Canvas, Notes e Docs no seu
+                Crie um Project local para manter Canvas e Docs no seu
                 dispositivo.
               </span>
               <button

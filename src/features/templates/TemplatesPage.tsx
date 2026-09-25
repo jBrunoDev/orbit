@@ -49,7 +49,7 @@ export default function TemplatesPage() {
 
   const navigate = async (section: string) => {
     if (section === "home") { window.location.hash = ""; return; }
-    if (section === "canvas" || section === "notes" || section === "calendar" || section === "docs") {
+    if (section === "canvas" || section === "calendar" || section === "docs") {
       let latestProject: LocalProject | undefined = projects[0];
       if (!latestProject && isTauriAvailable()) {
         try {
@@ -90,9 +90,7 @@ export default function TemplatesPage() {
     if (!isCreating) setDialogMode(null);
   };
   const openTemplateTarget = (result: TemplateApplicationResult) => {
-    window.location.hash = selected.openTarget === "canvas"
-      ? `canvas/${encodeURIComponent(result.projectId)}/${encodeURIComponent(result.canvasId)}`
-      : `notes/${encodeURIComponent(result.projectId)}`;
+    window.location.hash = `canvas/${encodeURIComponent(result.projectId)}/${encodeURIComponent(result.canvasId)}`;
   };
   const createProjectFromTemplate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

@@ -11,6 +11,9 @@ use uuid::Uuid;
 
 const CATALOG_DATABASE: &str = "orbit.db";
 const PROJECT_DATABASE: &str = "project.db";
+const DOCS_DATABASE: &str = "docs.db";
+const NOTES_DATABASE: &str = "notes.db";
+const CALENDAR_DATABASE: &str = "calendar.db";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,19 +182,19 @@ struct DocSummary {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateDoc { project_id: String, title: Option<String>, parent_id: Option<String>, kind: Option<String> }
+struct CreateDoc { title: Option<String>, parent_id: Option<String>, kind: Option<String> }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UpdateDoc { project_id: String, document_id: String, title: String, content: String }
+struct UpdateDoc { document_id: String, title: String, content: String }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DocumentAction { project_id: String, document_id: String }
+struct DocumentAction { document_id: String }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ExportDocMarkdown { project_id: String, document_id: String, destination_path: String }
+struct ExportDocMarkdown { document_id: String, destination_path: String }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -237,15 +240,15 @@ struct SimulationRunSummary { id: String, created_at: i64 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateCalendarEntry { project_id: String, entry_date: String, content: String }
+struct CreateCalendarEntry { entry_date: String, content: String }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateNote { project_id: String, title: Option<String> }
+struct CreateNote { title: Option<String> }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UpdateNote { project_id: String, note_id: String, title: String, content: String, tags: Vec<String> }
+struct UpdateNote { note_id: String, title: String, content: String, tags: Vec<String> }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,6 +261,22 @@ struct CreateAsset { project_id: String, original_name: String, media_type: Stri
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AssetBinary { media_type: String, bytes: Vec<u8> }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateDocAsset { original_name: String, media_type: String, bytes: Vec<u8> }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadDocAsset { asset_id: String }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateNoteAsset { original_name: String, media_type: String, bytes: Vec<u8> }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadNoteAsset { asset_id: String }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -456,6 +475,61 @@ fn migrate_catalog(connection: &Connection) -> Result<(), String> {
     migrate_template_catalog(connection)?;
     migrate_ai_catalog(connection)?;
     migrate_profile_catalog(connection)
+}
+
+fn open_module_database(app: &AppHandle, filename: &str) -> Result<Connection, String> {
+    let path = data_dir(app)?.join(filename);
+    let connection = Connection::open(path).map_err(|error| format!("Não foi possível abrir o banco do módulo: {error}"))?;
+    connection.execute_batch("PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);")
+        .map_err(|error| format!("Não foi possível preparar o banco do módulo: {error}"))?;
+    let schema = match filename {
+        DOCS_DATABASE => "CREATE TABLE IF NOT EXISTS doc_spaces (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER); CREATE TABLE IF NOT EXISTS docs (id TEXT PRIMARY KEY NOT NULL, space_id TEXT, parent_id TEXT, kind TEXT NOT NULL DEFAULT 'page', title TEXT NOT NULL, slug TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, content_format TEXT NOT NULL DEFAULT 'markdown', sort_order INTEGER NOT NULL DEFAULT 0, origin TEXT NOT NULL DEFAULT 'manual', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER); CREATE TABLE IF NOT EXISTS doc_assets (id TEXT PRIMARY KEY NOT NULL, original_name TEXT NOT NULL, stored_path TEXT NOT NULL UNIQUE, media_type TEXT NOT NULL, byte_size INTEGER NOT NULL CHECK(byte_size >= 0), created_at INTEGER NOT NULL, deleted_at INTEGER); CREATE INDEX IF NOT EXISTS docs_tree ON docs(space_id, parent_id, deleted_at, sort_order, updated_at DESC);",
+        NOTES_DATABASE => "CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, content_format TEXT NOT NULL DEFAULT 'markdown', tags TEXT NOT NULL DEFAULT '[]', is_pinned INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER); CREATE TABLE IF NOT EXISTS note_assets (id TEXT PRIMARY KEY NOT NULL, original_name TEXT NOT NULL, stored_path TEXT NOT NULL UNIQUE, media_type TEXT NOT NULL, byte_size INTEGER NOT NULL CHECK(byte_size >= 0), created_at INTEGER NOT NULL, deleted_at INTEGER); CREATE INDEX IF NOT EXISTS notes_list ON notes(deleted_at, is_archived, is_pinned DESC, updated_at DESC);",
+        CALENDAR_DATABASE => "CREATE TABLE IF NOT EXISTS calendar_entries (id TEXT PRIMARY KEY NOT NULL, entry_date TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER); CREATE INDEX IF NOT EXISTS calendar_entries_date ON calendar_entries(entry_date, deleted_at);",
+        _ => return Err("Módulo local desconhecido.".to_string()),
+    };
+    connection.execute_batch(schema).map_err(|error| format!("Não foi possível criar a estrutura do módulo: {error}"))?;
+    Ok(connection)
+}
+
+fn migrate_independent_modules(app: &AppHandle) -> Result<(), String> {
+    let catalog = open_catalog(app)?;
+    let mut statement = catalog.prepare("SELECT id, relative_path, deleted_at IS NOT NULL FROM projects").map_err(|error| format!("Não foi possível listar os Projects legados: {error}"))?;
+    let projects = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, bool>(2)?))).map_err(|error| format!("Não foi possível ler os Projects legados: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("Não foi possível carregar os Projects legados: {error}"))?;
+    for filename in [DOCS_DATABASE, NOTES_DATABASE, CALENDAR_DATABASE] {
+        let module = open_module_database(app, filename)?;
+        let applied = module.query_row("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = 1)", [], |row| row.get::<_, bool>(0)).map_err(|error| format!("Não foi possível verificar a migration do módulo: {error}"))?;
+        if applied { continue; }
+        for (id, relative, deleted) in &projects {
+            let path = if *deleted { data_dir(app)?.join("trash").join("projects").join(id).join(PROJECT_DATABASE) } else { data_dir(app)?.join(relative).join(PROJECT_DATABASE) };
+            if !path.exists() { continue; }
+            module.execute("ATTACH DATABASE ?1 AS legacy", [path.to_string_lossy().as_ref()]).map_err(|error| format!("Não foi possível anexar dados legados: {error}"))?;
+            match filename {
+                DOCS_DATABASE => { let _ = module.execute("INSERT OR IGNORE INTO docs(id,space_id,parent_id,kind,title,slug,content,content_format,sort_order,origin,created_at,updated_at,deleted_at) SELECT id,space_id,parent_id,kind,title,slug,content,content_format,sort_order,origin,created_at,updated_at,deleted_at FROM legacy.docs", []); let _ = module.execute("INSERT OR IGNORE INTO doc_spaces(id,name,sort_order,created_at,updated_at,deleted_at) SELECT id,name,sort_order,created_at,updated_at,deleted_at FROM legacy.doc_spaces", []); let _ = module.execute("INSERT OR IGNORE INTO doc_assets(id,original_name,stored_path,media_type,byte_size,created_at,deleted_at) SELECT id,original_name,stored_path,media_type,byte_size,created_at,deleted_at FROM legacy.assets", []); let source_assets = path.parent().unwrap_or(Path::new("")).join("assets"); let target_assets = data_dir(app)?.join("docs-assets"); let _ = fs::create_dir_all(&target_assets); if let Ok(entries) = fs::read_dir(source_assets) { for entry in entries.flatten() { let target = target_assets.join(entry.file_name()); if !target.exists() { let _ = fs::copy(entry.path(), target); } } } }
+                NOTES_DATABASE => { let _ = module.execute("INSERT OR IGNORE INTO notes(id,title,content,content_format,tags,is_pinned,is_archived,created_at,updated_at,deleted_at) SELECT id,title,content,content_format,tags,is_pinned,is_archived,created_at,updated_at,deleted_at FROM legacy.notes", []); }
+                CALENDAR_DATABASE => { let _ = module.execute("INSERT OR IGNORE INTO calendar_entries(id,entry_date,content,created_at,updated_at,deleted_at) SELECT id,entry_date,content,created_at,updated_at,deleted_at FROM legacy.calendar_entries", []); }
+                _ => {}
+            }
+            module.execute_batch("DETACH DATABASE legacy;").map_err(|error| format!("Não foi possível finalizar a migration legada: {error}"))?;
+        }
+        module.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(1, ?1)", [timestamp()?]).map_err(|error| format!("Não foi possível registrar a migration do módulo: {error}"))?;
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComponentLibrary {
+    id: String,
+    label: String,
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetComponentLibraryEnabled {
+    library_id: String,
+    enabled: bool,
 }
 
 fn migrate_component_library_catalog(connection: &Connection) -> Result<(), String> {
@@ -992,6 +1066,7 @@ fn load_canvas_snapshot(
 
 #[tauri::command]
 fn initialize_local_profile(app: AppHandle) -> Result<LocalProfileInitialization, String> {
+    migrate_independent_modules(&app)?;
     let connection = open_catalog(&app)?;
     let existing = connection.query_row(
         "SELECT p.id, w.id, w.name FROM local_profiles p JOIN workspaces w ON w.profile_id = p.id WHERE w.deleted_at IS NULL ORDER BY w.created_at LIMIT 1",
@@ -1347,6 +1422,33 @@ fn add_library_component(app: AppHandle, source_key: String) -> Result<PersonalL
     connection.execute("INSERT INTO library_components(id, profile_id, source_key, added_at) VALUES(?1, ?2, ?3, ?4)", params![id, profile_id, source_key, now])
         .map_err(|error| format!("Não foi possível adicionar o Component à biblioteca: {error}"))?;
     Ok(PersonalLibraryItem { id, source_key: source_key.to_string(), is_favorite: false, added_at: now })
+}
+
+#[tauri::command]
+fn list_component_libraries(app: AppHandle) -> Result<Vec<ComponentLibrary>, String> {
+    let initialization = initialize_local_profile(app.clone())?;
+    let connection = open_catalog(&app)?;
+    ensure_component_library(&connection, &initialization.profile_id)?;
+    let mut statement = connection.prepare("SELECT id, label, enabled FROM component_libraries WHERE profile_id = ?1 ORDER BY sort_order")
+        .map_err(|error| format!("Não foi possível preparar as bibliotecas de Components: {error}"))?;
+    let libraries = statement.query_map([initialization.profile_id], |row| Ok(ComponentLibrary { id: row.get(0)?, label: row.get(1)?, enabled: row.get(2)? }))
+        .map_err(|error| format!("Não foi possível listar as bibliotecas de Components: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Não foi possível ler as bibliotecas de Components: {error}"))?;
+    Ok(libraries)
+}
+
+#[tauri::command]
+fn set_component_library_enabled(app: AppHandle, input: SetComponentLibraryEnabled) -> Result<ComponentLibrary, String> {
+    if input.library_id != "aws" { return Err("Essa biblioteca não pode ser alterada.".to_string()); }
+    let initialization = initialize_local_profile(app.clone())?;
+    let connection = open_catalog(&app)?;
+    ensure_component_library(&connection, &initialization.profile_id)?;
+    let changed = connection.execute("UPDATE component_libraries SET enabled = ?1, updated_at = ?2 WHERE id = ?3 AND profile_id = ?4", params![input.enabled, timestamp()?, input.library_id, initialization.profile_id])
+        .map_err(|error| format!("Não foi possível salvar a biblioteca de Components: {error}"))?;
+    if changed == 0 { return Err("A biblioteca selecionada não existe.".to_string()); }
+    connection.query_row("SELECT id, label, enabled FROM component_libraries WHERE id = ?1 AND profile_id = ?2", params![input.library_id, initialization.profile_id], |row| Ok(ComponentLibrary { id: row.get(0)?, label: row.get(1)?, enabled: row.get(2)? }))
+        .map_err(|error| format!("Não foi possível ler a biblioteca atualizada: {error}"))
 }
 
 #[tauri::command]
@@ -1714,41 +1816,39 @@ fn read_asset(app: AppHandle, input: ReadAsset) -> Result<AssetBinary, String> {
 }
 
 #[tauri::command]
-fn list_notes(app: AppHandle, project_id: String, archived: Option<bool>) -> Result<Vec<NoteSummary>, String> {
-    let connection = open_project_database(&app, &project_id)?;
+fn list_notes(app: AppHandle, archived: Option<bool>) -> Result<Vec<NoteSummary>, String> {
+    migrate_independent_modules(&app)?; let connection = open_module_database(&app, NOTES_DATABASE)?;
     let archived = archived.unwrap_or(false);
-    let mut statement = connection.prepare("SELECT id, project_id, title, content, content_format, is_pinned, is_archived, tags, created_at, updated_at FROM notes WHERE project_id = ?1 AND deleted_at IS NULL AND is_archived = ?2 ORDER BY is_pinned DESC, updated_at DESC").map_err(|error| format!("Não foi possível preparar as Notes: {error}"))?;
-    let notes = statement.query_map(params![project_id, archived], read_note).map_err(|error| format!("Não foi possível listar as Notes: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("Não foi possível ler as Notes: {error}"))?;
+    let mut statement = connection.prepare("SELECT id, 'notes', title, content, content_format, is_pinned, is_archived, tags, created_at, updated_at FROM notes WHERE deleted_at IS NULL AND is_archived = ?1 ORDER BY is_pinned DESC, updated_at DESC").map_err(|error| format!("Não foi possível preparar as Notes: {error}"))?;
+    let notes = statement.query_map([archived], read_note).map_err(|error| format!("Não foi possível listar as Notes: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("Não foi possível ler as Notes: {error}"))?;
     Ok(notes)
 }
 
 #[tauri::command]
-fn get_note(app: AppHandle, project_id: String, note_id: String) -> Result<NoteSummary, String> {
-    let connection = open_project_database(&app, &project_id)?;
-    connection.query_row("SELECT id, project_id, title, content, content_format, is_pinned, is_archived, tags, created_at, updated_at FROM notes WHERE id = ?1 AND project_id = ?2 AND deleted_at IS NULL", params![note_id, project_id], read_note).map_err(|error| format!("Não foi possível abrir a Note: {error}"))
+fn get_note(app: AppHandle, note_id: String) -> Result<NoteSummary, String> {
+    let connection = open_module_database(&app, NOTES_DATABASE)?;
+    connection.query_row("SELECT id, 'notes', title, content, content_format, is_pinned, is_archived, tags, created_at, updated_at FROM notes WHERE id = ?1 AND deleted_at IS NULL", [note_id], read_note).map_err(|error| format!("Não foi possível abrir a Note: {error}"))
 }
 
 #[tauri::command]
 fn create_note(app: AppHandle, input: CreateNote) -> Result<NoteSummary, String> {
-    let connection = open_project_database(&app, &input.project_id)?;
+    migrate_independent_modules(&app)?; let connection = open_module_database(&app, NOTES_DATABASE)?;
     let now = timestamp()?; let id = Uuid::now_v7().to_string(); let title = input.title.unwrap_or_else(|| "Untitled note".to_string());
     let transaction = connection.unchecked_transaction().map_err(|error| format!("Não foi possível iniciar a criação da Note: {error}"))?;
-    transaction.execute("INSERT INTO notes(id, project_id, title, content, content_format, tags, created_at, updated_at) VALUES(?1, ?2, ?3, '', 'markdown', '[]', ?4, ?4)", params![id, input.project_id, title, now]).map_err(|error| format!("Não foi possível criar a Note: {error}"))?;
-    append_revision(&transaction, &id, "note", "created", json!({"title": title}), now)?;
+    transaction.execute("INSERT INTO notes(id, title, content, content_format, tags, created_at, updated_at) VALUES(?1, ?2, '', 'markdown', '[]', ?3, ?3)", params![id, title, now]).map_err(|error| format!("Não foi possível criar a Note: {error}"))?;
     transaction.commit().map_err(|error| format!("Não foi possível confirmar a Note: {error}"))?;
-    get_note(app, input.project_id, id)
+    get_note(app, id)
 }
 
 #[tauri::command]
 fn update_note(app: AppHandle, input: UpdateNote) -> Result<NoteSummary, String> {
     if input.title.trim().is_empty() { return Err("O título da Note é obrigatório.".to_string()); }
-    let connection = open_project_database(&app, &input.project_id)?; let now = timestamp()?;
+    let connection = open_module_database(&app, NOTES_DATABASE)?; let now = timestamp()?;
     let transaction = connection.unchecked_transaction().map_err(|error| format!("Não foi possível iniciar a atualização da Note: {error}"))?;
-    let changed = transaction.execute("UPDATE notes SET title = ?1, content = ?2, tags = ?3, updated_at = ?4 WHERE id = ?5 AND project_id = ?6 AND deleted_at IS NULL", params![input.title.trim(), input.content, serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string()), now, input.note_id, input.project_id]).map_err(|error| format!("Não foi possível salvar a Note: {error}"))?;
+    let changed = transaction.execute("UPDATE notes SET title = ?1, content = ?2, tags = ?3, updated_at = ?4 WHERE id = ?5 AND deleted_at IS NULL", params![input.title.trim(), input.content, serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string()), now, input.note_id]).map_err(|error| format!("Não foi possível salvar a Note: {error}"))?;
     if changed != 1 { return Err("A Note solicitada não existe.".to_string()); }
-    append_revision(&transaction, &input.note_id, "note", "updated", json!({"title": input.title.trim()}), now)?;
     transaction.commit().map_err(|error| format!("Não foi possível confirmar a Note: {error}"))?;
-    get_note(app, input.project_id, input.note_id)
+    get_note(app, input.note_id)
 }
 
 fn slugify(title: &str) -> String {
@@ -1761,11 +1861,11 @@ fn slugify(title: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
-fn ensure_default_doc_space(connection: &Connection, project_id: &str) -> Result<String, String> {
-    if let Some(id) = connection.query_row("SELECT id FROM doc_spaces WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY sort_order, created_at LIMIT 1", [project_id], |row| row.get(0)).optional().map_err(|error| format!("Não foi possível abrir o espaço de Docs: {error}"))? { return Ok(id); }
+fn ensure_default_doc_space(connection: &Connection) -> Result<String, String> {
+    if let Some(id) = connection.query_row("SELECT id FROM doc_spaces WHERE deleted_at IS NULL ORDER BY sort_order, created_at LIMIT 1", [], |row| row.get(0)).optional().map_err(|error| format!("Não foi possível abrir o espaço de Docs: {error}"))? { return Ok(id); }
     let id = Uuid::now_v7().to_string(); let now = timestamp()?;
-    connection.execute("INSERT INTO doc_spaces(id, project_id, name, sort_order, created_at, updated_at) VALUES(?1, ?2, 'Docs', 0, ?3, ?3)", params![id, project_id, now]).map_err(|error| format!("Não foi possível criar o espaço de Docs: {error}"))?;
-    connection.execute("UPDATE docs SET space_id = ?1 WHERE project_id = ?2 AND space_id IS NULL", params![id, project_id]).map_err(|error| format!("Não foi possível organizar os Docs existentes: {error}"))?;
+    connection.execute("INSERT INTO doc_spaces(id, name, sort_order, created_at, updated_at) VALUES(?1, 'Docs', 0, ?2, ?2)", params![id, now]).map_err(|error| format!("Não foi possível criar o espaço de Docs: {error}"))?;
+    connection.execute("UPDATE docs SET space_id = ?1 WHERE space_id IS NULL", [id.as_str()]).map_err(|error| format!("Não foi possível organizar os Docs existentes: {error}"))?;
     Ok(id)
 }
 
@@ -1773,62 +1873,119 @@ fn read_doc(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocSummary> {
     Ok(DocSummary { id: row.get(0)?, project_id: row.get(1)?, space_id: row.get(2)?, parent_id: row.get(3)?, kind: row.get(4)?, title: row.get(5)?, slug: row.get(6)?, content: row.get(7)?, content_format: row.get(8)?, sort_order: row.get(9)?, origin: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)? })
 }
 
-const DOC_SELECT: &str = "SELECT id, project_id, space_id, parent_id, kind, title, slug, content, content_format, sort_order, origin, created_at, updated_at FROM docs";
+const DOC_SELECT: &str = "SELECT id, 'docs', space_id, parent_id, kind, title, slug, content, content_format, sort_order, origin, created_at, updated_at FROM docs";
 
 #[tauri::command]
-fn list_docs(app: AppHandle, project_id: String, deleted: Option<bool>) -> Result<Vec<DocSummary>, String> {
-    let connection = open_project_database(&app, &project_id)?; ensure_default_doc_space(&connection, &project_id)?;
+fn list_docs(app: AppHandle, deleted: Option<bool>) -> Result<Vec<DocSummary>, String> {
+    migrate_independent_modules(&app)?; let connection = open_module_database(&app, DOCS_DATABASE)?; ensure_default_doc_space(&connection)?;
     let predicate = if deleted.unwrap_or(false) { "deleted_at IS NOT NULL" } else { "deleted_at IS NULL" };
-    let query = format!("{DOC_SELECT} WHERE project_id = ?1 AND {predicate} ORDER BY kind DESC, sort_order, updated_at DESC");
+    let query = format!("{DOC_SELECT} WHERE {predicate} ORDER BY kind DESC, sort_order, updated_at DESC");
     let mut statement = connection.prepare(&query).map_err(|error| format!("Não foi possível preparar os Docs: {error}"))?;
-    let docs = statement.query_map([project_id], read_doc).map_err(|error| format!("Não foi possível listar os Docs: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("Não foi possível ler os Docs: {error}"))?;
+    let docs = statement.query_map([], read_doc).map_err(|error| format!("Não foi possível listar os Docs: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("Não foi possível ler os Docs: {error}"))?;
     Ok(docs)
 }
 
 #[tauri::command]
-fn get_doc(app: AppHandle, project_id: String, document_id: String) -> Result<DocSummary, String> {
-    let connection = open_project_database(&app, &project_id)?; let query = format!("{DOC_SELECT} WHERE id = ?1 AND project_id = ?2 AND deleted_at IS NULL");
-    connection.query_row(&query, params![document_id, project_id], read_doc).map_err(|error| format!("Não foi possível abrir o Doc: {error}"))
+fn get_doc(app: AppHandle, document_id: String) -> Result<DocSummary, String> {
+    let connection = open_module_database(&app, DOCS_DATABASE)?; let query = format!("{DOC_SELECT} WHERE id = ?1 AND deleted_at IS NULL");
+    connection.query_row(&query, [document_id], read_doc).map_err(|error| format!("Não foi possível abrir o Doc: {error}"))
 }
 
 #[tauri::command]
 fn create_doc(app: AppHandle, input: CreateDoc) -> Result<DocSummary, String> {
-    let connection = open_project_database(&app, &input.project_id)?; let kind = input.kind.unwrap_or_else(|| "page".to_string());
+    migrate_independent_modules(&app)?; let connection = open_module_database(&app, DOCS_DATABASE)?; let kind = input.kind.unwrap_or_else(|| "page".to_string());
     if kind != "page" && kind != "folder" { return Err("O tipo de Doc é inválido.".to_string()); }
-    if let Some(parent_id) = &input.parent_id { let valid = connection.query_row("SELECT EXISTS(SELECT 1 FROM docs WHERE id = ?1 AND project_id = ?2 AND kind = 'folder' AND deleted_at IS NULL)", params![parent_id, input.project_id], |row| row.get::<_, bool>(0)).map_err(|error| format!("Não foi possível validar a pasta do Doc: {error}"))?; if !valid { return Err("A pasta selecionada não existe mais.".to_string()); } }
+    if let Some(parent_id) = &input.parent_id { let valid = connection.query_row("SELECT EXISTS(SELECT 1 FROM docs WHERE id = ?1 AND kind = 'folder' AND deleted_at IS NULL)", [parent_id], |row| row.get::<_, bool>(0)).map_err(|error| format!("Não foi possível validar a pasta do Doc: {error}"))?; if !valid { return Err("A pasta selecionada não existe mais.".to_string()); } }
     let title_owned = input.title.unwrap_or_else(|| if kind == "folder" { "Untitled folder".to_string() } else { "Untitled document".to_string() }); let title = title_owned.trim();
     if title.is_empty() { return Err("O título do Doc é obrigatório.".to_string()); }
-    let id = Uuid::now_v7().to_string(); let now = timestamp()?; let space_id = ensure_default_doc_space(&connection, &input.project_id)?;
+    let id = Uuid::now_v7().to_string(); let now = timestamp()?; let space_id = ensure_default_doc_space(&connection)?;
     let transaction = connection.unchecked_transaction().map_err(|error| format!("Não foi possível iniciar a criação do Doc: {error}"))?;
-    transaction.execute("INSERT INTO docs(id, project_id, space_id, parent_id, kind, title, slug, content, content_format, sort_order, origin, created_at, updated_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, '', 'markdown', 0, 'manual', ?8, ?8)", params![id, input.project_id, space_id, input.parent_id, kind, title, slugify(title), now]).map_err(|error| format!("Não foi possível criar o Doc: {error}"))?;
-    append_revision(&transaction, &id, "doc", "created", json!({"title": title}), now)?;
+    transaction.execute("INSERT INTO docs(id, space_id, parent_id, kind, title, slug, content, content_format, sort_order, origin, created_at, updated_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, '', 'markdown', 0, 'manual', ?7, ?7)", params![id, space_id, input.parent_id, kind, title, slugify(title), now]).map_err(|error| format!("Não foi possível criar o Doc: {error}"))?;
     transaction.commit().map_err(|error| format!("Não foi possível confirmar o Doc: {error}"))?;
-    get_doc(app, input.project_id, id)
+    get_doc(app, id)
 }
 
 #[tauri::command]
 fn update_doc(app: AppHandle, input: UpdateDoc) -> Result<DocSummary, String> {
     let title = input.title.trim(); if title.is_empty() { return Err("O título do Doc é obrigatório.".to_string()); }
-    let connection = open_project_database(&app, &input.project_id)?; let now = timestamp()?;
+    let connection = open_module_database(&app, DOCS_DATABASE)?; let now = timestamp()?;
     let transaction = connection.unchecked_transaction().map_err(|error| format!("Não foi possível iniciar a atualização do Doc: {error}"))?;
-    let changed = transaction.execute("UPDATE docs SET title = ?1, slug = ?2, content = ?3, updated_at = ?4 WHERE id = ?5 AND project_id = ?6 AND kind = 'page' AND deleted_at IS NULL", params![title, slugify(title), input.content, now, input.document_id, input.project_id]).map_err(|error| format!("Não foi possível salvar o Doc: {error}"))?;
+    let changed = transaction.execute("UPDATE docs SET title = ?1, slug = ?2, content = ?3, updated_at = ?4 WHERE id = ?5 AND kind = 'page' AND deleted_at IS NULL", params![title, slugify(title), input.content, now, input.document_id]).map_err(|error| format!("Não foi possível salvar o Doc: {error}"))?;
     if changed != 1 { return Err("O Doc solicitado não existe ou é uma pasta.".to_string()); }
-    append_revision(&transaction, &input.document_id, "doc", "updated", json!({"title": title}), now)?;
     transaction.commit().map_err(|error| format!("Não foi possível confirmar o Doc: {error}"))?;
-    get_doc(app, input.project_id, input.document_id)
+    get_doc(app, input.document_id)
+}
+
+fn validate_image_asset(media_type: &str, bytes: &[u8]) -> Result<(), String> {
+    let allowed = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+    if !allowed.contains(&media_type) { return Err("Tipo de imagem não suportado.".to_string()); }
+    if bytes.len() > 10 * 1024 * 1024 { return Err("A imagem excede o limite de 10 MB.".to_string()); }
+    Ok(())
+}
+
+#[tauri::command]
+fn create_doc_asset(app: AppHandle, input: CreateDocAsset) -> Result<AssetSummary, String> {
+    migrate_independent_modules(&app)?;
+    validate_image_asset(&input.media_type, &input.bytes)?;
+    let connection = open_module_database(&app, DOCS_DATABASE)?;
+    let id = Uuid::now_v7().to_string();
+    let safe_name = input.original_name.replace(['\\', '/', ':'], "_");
+    let extension = safe_name.rsplit('.').next().filter(|value| *value != safe_name).unwrap_or("bin");
+    let relative = format!("docs-assets/{id}.{extension}");
+    let path = data_dir(&app)?.join(&relative);
+    fs::create_dir_all(path.parent().ok_or_else(|| "Não foi possível preparar os assets dos Docs.".to_string())?).map_err(|error| format!("Não foi possível preparar os assets dos Docs: {error}"))?;
+    fs::write(&path, &input.bytes).map_err(|error| format!("Não foi possível salvar a imagem dos Docs: {error}"))?;
+    let now = timestamp()?;
+    if let Err(error) = connection.execute("INSERT INTO doc_assets(id, original_name, stored_path, media_type, byte_size, created_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)", params![id, safe_name, relative, input.media_type, input.bytes.len() as i64, now]) { let _ = fs::remove_file(path); return Err(format!("Não foi possível registrar a imagem dos Docs: {error}")); }
+    Ok(AssetSummary { id, project_id: "docs".to_string(), original_name: safe_name, stored_path: relative, media_type: input.media_type, byte_size: input.bytes.len() as i64, created_at: now })
+}
+
+#[tauri::command]
+fn read_doc_asset(app: AppHandle, input: ReadDocAsset) -> Result<AssetBinary, String> {
+    migrate_independent_modules(&app)?;
+    let connection = open_module_database(&app, DOCS_DATABASE)?;
+    let (stored_path, media_type): (String, String) = connection.query_row("SELECT stored_path, media_type FROM doc_assets WHERE id = ?1 AND deleted_at IS NULL", [input.asset_id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(|error| format!("Não foi possível localizar a imagem dos Docs: {error}"))?;
+    let bytes = fs::read(data_dir(&app)?.join(stored_path)).map_err(|error| format!("Não foi possível ler a imagem dos Docs: {error}"))?;
+    Ok(AssetBinary { media_type, bytes })
+}
+
+#[tauri::command]
+fn create_note_asset(app: AppHandle, input: CreateNoteAsset) -> Result<AssetSummary, String> {
+    migrate_independent_modules(&app)?;
+    validate_image_asset(&input.media_type, &input.bytes)?;
+    let connection = open_module_database(&app, NOTES_DATABASE)?;
+    let id = Uuid::now_v7().to_string();
+    let safe_name = input.original_name.replace(['\\', '/', ':'], "_");
+    let extension = safe_name.rsplit('.').next().filter(|value| *value != safe_name).unwrap_or("bin");
+    let relative = format!("notes-assets/{id}.{extension}");
+    let path = data_dir(&app)?.join(&relative);
+    fs::create_dir_all(path.parent().ok_or_else(|| "Não foi possível preparar os assets das Notes.".to_string())?).map_err(|error| format!("Não foi possível preparar os assets das Notes: {error}"))?;
+    fs::write(&path, &input.bytes).map_err(|error| format!("Não foi possível salvar a imagem das Notes: {error}"))?;
+    let now = timestamp()?;
+    if let Err(error) = connection.execute("INSERT INTO note_assets(id, original_name, stored_path, media_type, byte_size, created_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)", params![id, safe_name, relative, input.media_type, input.bytes.len() as i64, now]) { let _ = fs::remove_file(path); return Err(format!("Não foi possível registrar a imagem das Notes: {error}")); }
+    Ok(AssetSummary { id, project_id: "notes".to_string(), original_name: safe_name, stored_path: relative, media_type: input.media_type, byte_size: input.bytes.len() as i64, created_at: now })
+}
+
+#[tauri::command]
+fn read_note_asset(app: AppHandle, input: ReadNoteAsset) -> Result<AssetBinary, String> {
+    migrate_independent_modules(&app)?;
+    let connection = open_module_database(&app, NOTES_DATABASE)?;
+    let (stored_path, media_type): (String, String) = connection.query_row("SELECT stored_path, media_type FROM note_assets WHERE id = ?1 AND deleted_at IS NULL", [input.asset_id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(|error| format!("Não foi possível localizar a imagem das Notes: {error}"))?;
+    let bytes = fs::read(data_dir(&app)?.join(stored_path)).map_err(|error| format!("Não foi possível ler a imagem das Notes: {error}"))?;
+    Ok(AssetBinary { media_type, bytes })
 }
 
 #[tauri::command]
 fn trash_doc(app: AppHandle, input: DocumentAction) -> Result<(), String> {
-    let connection = open_project_database(&app, &input.project_id)?; let now = timestamp()?;
-    let changed = connection.execute("WITH RECURSIVE descendants(id) AS (SELECT id FROM docs WHERE id = ?1 AND project_id = ?2 AND deleted_at IS NULL UNION ALL SELECT docs.id FROM docs JOIN descendants ON docs.parent_id = descendants.id WHERE docs.project_id = ?2 AND docs.deleted_at IS NULL) UPDATE docs SET deleted_at = ?3, updated_at = ?3 WHERE id IN (SELECT id FROM descendants)", params![input.document_id, input.project_id, now]).map_err(|error| format!("Não foi possível mover o Doc para a lixeira: {error}"))?;
+    let connection = open_module_database(&app, DOCS_DATABASE)?; let now = timestamp()?;
+    let changed = connection.execute("WITH RECURSIVE descendants(id) AS (SELECT id FROM docs WHERE id = ?1 AND deleted_at IS NULL UNION ALL SELECT docs.id FROM docs JOIN descendants ON docs.parent_id = descendants.id WHERE docs.deleted_at IS NULL) UPDATE docs SET deleted_at = ?2, updated_at = ?2 WHERE id IN (SELECT id FROM descendants)", params![input.document_id, now]).map_err(|error| format!("Não foi possível mover o Doc para a lixeira: {error}"))?;
     if changed == 0 { return Err("O Doc solicitado não existe.".to_string()); } Ok(())
 }
 
 #[tauri::command]
 fn restore_doc(app: AppHandle, input: DocumentAction) -> Result<(), String> {
-    let connection = open_project_database(&app, &input.project_id)?;
-    let changed = connection.execute("UPDATE docs SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2 AND project_id = ?3 AND deleted_at IS NOT NULL", params![timestamp()?, input.document_id, input.project_id]).map_err(|error| format!("Não foi possível restaurar o Doc: {error}"))?;
+    let connection = open_module_database(&app, DOCS_DATABASE)?;
+    let changed = connection.execute("UPDATE docs SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NOT NULL", params![timestamp()?, input.document_id]).map_err(|error| format!("Não foi possível restaurar o Doc: {error}"))?;
     if changed != 1 { return Err("O Doc solicitado não está na lixeira.".to_string()); } Ok(())
 }
 
@@ -1836,8 +1993,28 @@ fn restore_doc(app: AppHandle, input: DocumentAction) -> Result<(), String> {
 fn export_doc_markdown(app: AppHandle, input: ExportDocMarkdown) -> Result<(), String> {
     let path = PathBuf::from(&input.destination_path);
     if path.extension().and_then(|extension| extension.to_str()).map(|extension| extension.eq_ignore_ascii_case("md")) != Some(true) { return Err("Escolha um arquivo com extensão .md.".to_string()); }
-    let doc = get_doc(app, input.project_id, input.document_id)?; if doc.kind != "page" { return Err("Somente documentos podem ser exportados.".to_string()); }
-    fs::write(path, doc.content).map_err(|error| format!("Não foi possível exportar o Markdown: {error}"))
+    let doc = get_doc(app.clone(), input.document_id)?; if doc.kind != "page" { return Err("Somente documentos podem ser exportados.".to_string()); }
+    let assets_dir_name = format!("{}.assets", path.file_stem().and_then(|value| value.to_str()).unwrap_or("document"));
+    let assets_dir = path.parent().unwrap_or(Path::new(".")).join(&assets_dir_name);
+    let connection = open_module_database(&app, DOCS_DATABASE)?;
+    let mut content = doc.content;
+    let mut offset = 0usize;
+    while let Some(found) = content[offset..].find("asset://") {
+        let start = offset + found;
+        let id_start = start + "asset://".len();
+        let id_end = content[id_start..].find(|character: char| !character.is_ascii_alphanumeric() && character != '-').map(|value| id_start + value).unwrap_or(content.len());
+        let id = &content[id_start..id_end];
+        let asset: Option<(String, String)> = connection.query_row("SELECT stored_path, media_type FROM doc_assets WHERE id = ?1 AND deleted_at IS NULL", [id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).optional().map_err(|error| format!("Não foi possível preparar a exportação dos assets: {error}"))?;
+        if let Some((stored_path, _)) = asset {
+            let filename = Path::new(&stored_path).file_name().and_then(|value| value.to_str()).ok_or_else(|| "Nome de asset inválido.".to_string())?;
+            fs::create_dir_all(&assets_dir).map_err(|error| format!("Não foi possível criar a pasta de assets exportados: {error}"))?;
+            fs::copy(data_dir(&app)?.join(&stored_path), assets_dir.join(filename)).map_err(|error| format!("Não foi possível exportar uma imagem: {error}"))?;
+            let replacement = format!("{assets_dir_name}/{filename}");
+            content.replace_range(start..id_end, &replacement);
+            offset = start + replacement.len();
+        } else { offset = id_end; }
+    }
+    fs::write(path, content).map_err(|error| format!("Não foi possível exportar o Markdown: {error}"))
 }
 
 fn secret_entry(name: &str) -> Result<keyring::Entry, String> { keyring::Entry::new("Orbit", name).map_err(|error| format!("Não foi possível acessar o cofre do sistema: {error}")) }
@@ -1943,12 +2120,12 @@ fn read_calendar_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<CalendarEntr
 }
 
 #[tauri::command]
-fn list_calendar_entries(app: AppHandle, project_id: String, start_date: String, end_date: String) -> Result<Vec<CalendarEntry>, String> {
+fn list_calendar_entries(app: AppHandle, start_date: String, end_date: String) -> Result<Vec<CalendarEntry>, String> {
     if !valid_calendar_date(&start_date) || !valid_calendar_date(&end_date) || start_date > end_date { return Err("Informe um intervalo de datas válido para o Calendar.".to_string()); }
-    let connection = open_project_database(&app, &project_id)?;
-    let mut statement = connection.prepare("SELECT id, project_id, entry_date, content, created_at, updated_at FROM calendar_entries WHERE project_id = ?1 AND entry_date >= ?2 AND entry_date <= ?3 AND deleted_at IS NULL ORDER BY entry_date, created_at")
+    migrate_independent_modules(&app)?; let connection = open_module_database(&app, CALENDAR_DATABASE)?;
+    let mut statement = connection.prepare("SELECT id, 'calendar', entry_date, content, created_at, updated_at FROM calendar_entries WHERE entry_date >= ?1 AND entry_date <= ?2 AND deleted_at IS NULL ORDER BY entry_date, created_at")
         .map_err(|error| format!("Não foi possível preparar o Calendar: {error}"))?;
-    let entries = statement.query_map(params![project_id, start_date, end_date], read_calendar_entry)
+    let entries = statement.query_map(params![start_date, end_date], read_calendar_entry)
         .map_err(|error| format!("Não foi possível listar o Calendar: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Não foi possível ler o Calendar: {error}"))?;
@@ -1960,25 +2137,34 @@ fn create_calendar_entry(app: AppHandle, input: CreateCalendarEntry) -> Result<C
     if !valid_calendar_date(&input.entry_date) { return Err("Escolha uma data válida para o planejamento.".to_string()); }
     let content = input.content.trim();
     if content.is_empty() { return Err("Escreva o que você quer planejar para este dia.".to_string()); }
-    let connection = open_project_database(&app, &input.project_id)?;
+    migrate_independent_modules(&app)?; let connection = open_module_database(&app, CALENDAR_DATABASE)?;
     let now = timestamp()?;
     let id = Uuid::now_v7().to_string();
-    connection.execute("INSERT INTO calendar_entries(id, project_id, entry_date, content, created_at, updated_at) VALUES(?1, ?2, ?3, ?4, ?5, ?5)", params![id, input.project_id, input.entry_date, content, now])
+    connection.execute("INSERT INTO calendar_entries(id, entry_date, content, created_at, updated_at) VALUES(?1, ?2, ?3, ?4, ?4)", params![id, input.entry_date, content, now])
         .map_err(|error| format!("Não foi possível salvar o planejamento: {error}"))?;
-    Ok(CalendarEntry { id, project_id: input.project_id, entry_date: input.entry_date, content: content.to_string(), created_at: now, updated_at: now })
+    Ok(CalendarEntry { id, project_id: "calendar".to_string(), entry_date: input.entry_date, content: content.to_string(), created_at: now, updated_at: now })
 }
 
 #[tauri::command]
-fn archive_note(app: AppHandle, project_id: String, note_id: String, archived: bool) -> Result<(), String> {
-    let connection = open_project_database(&app, &project_id)?;
-    connection.execute("UPDATE notes SET is_archived = ?1, updated_at = ?2 WHERE id = ?3 AND project_id = ?4 AND deleted_at IS NULL", params![archived, timestamp()?, note_id, project_id]).map_err(|error| format!("Não foi possível arquivar a Note: {error}"))?;
+fn archive_note(app: AppHandle, note_id: String, archived: bool) -> Result<(), String> {
+    let connection = open_module_database(&app, NOTES_DATABASE)?;
+    connection.execute("UPDATE notes SET is_archived = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL", params![archived, timestamp()?, note_id]).map_err(|error| format!("Não foi possível arquivar a Note: {error}"))?;
     Ok(())
 }
 
 #[tauri::command]
-fn toggle_note_pin(app: AppHandle, project_id: String, note_id: String) -> Result<(), String> {
-    let connection = open_project_database(&app, &project_id)?;
-    connection.execute("UPDATE notes SET is_pinned = CASE is_pinned WHEN 1 THEN 0 ELSE 1 END, updated_at = ?1 WHERE id = ?2 AND project_id = ?3 AND deleted_at IS NULL", params![timestamp()?, note_id, project_id]).map_err(|error| format!("Não foi possível fixar a Note: {error}"))?;
+fn trash_note(app: AppHandle, note_id: String) -> Result<(), String> {
+    let connection = open_module_database(&app, NOTES_DATABASE)?;
+    let now = timestamp()?;
+    let changed = connection.execute("UPDATE notes SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL", params![now, note_id]).map_err(|error| format!("Não foi possível mover a Note para a lixeira: {error}"))?;
+    if changed != 1 { return Err("A Note solicitada não existe ou já foi excluída.".to_string()); }
+    Ok(())
+}
+
+#[tauri::command]
+fn toggle_note_pin(app: AppHandle, note_id: String) -> Result<(), String> {
+    let connection = open_module_database(&app, NOTES_DATABASE)?;
+    connection.execute("UPDATE notes SET is_pinned = CASE is_pinned WHEN 1 THEN 0 ELSE 1 END, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL", params![timestamp()?, note_id]).map_err(|error| format!("Não foi possível fixar a Note: {error}"))?;
     Ok(())
 }
 
@@ -2024,6 +2210,8 @@ pub fn run() {
             apply_template_to_project,
             list_personal_library,
             add_library_component,
+            list_component_libraries,
+            set_component_library_enabled,
             load_canvas,
             create_canvas_component,
             create_canvas_visual,
@@ -2040,6 +2228,7 @@ pub fn run() {
             get_note,
             update_note,
             archive_note,
+            trash_note,
             toggle_note_pin,
             search_notes,
             list_docs,
@@ -2057,7 +2246,11 @@ pub fn run() {
             start_architecture_analysis,
             save_simulation_run,
             create_asset,
-            read_asset
+            read_asset,
+            create_doc_asset,
+            read_doc_asset,
+            create_note_asset,
+            read_note_asset
         ])
         .run(tauri::generate_context!())
         .expect("error while running Orbit");

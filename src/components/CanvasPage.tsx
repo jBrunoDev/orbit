@@ -6,7 +6,7 @@ import { ProjectHeader } from "../shared/ProjectHeader";
 import { componentRegistry } from "../features/canvas/domain/componentRegistry";
 import { OrbitNode } from "../features/canvas/OrbitNode";
 import { LibraryPanel } from "../features/library/LibraryPanel";
-import { defaultCatalogRepository } from "../features/catalog/repository";
+import { getCatalogItemByType } from "../features/catalog/repository";
 import { CatalogIcon } from "../features/catalog/icons";
 import type { CatalogItem } from "../features/catalog/types";
 import { type PersistedComponent, type PersistedVisual, useCanvasStore } from "../features/canvas/application/canvasStore";
@@ -79,10 +79,10 @@ function CanvasEngine({ projectId, canvasId }: { projectId: string; canvasId?: s
   }, [duplicateComponent, projectId, removeComponent, removeVisual, selected, selectedId, selectedImage]);
   const addCatalogItem = (item: CatalogItem, position?: { x: number; y: number }) => void addComponent(projectId, item, position);
   const addAtCenter = (item: CatalogItem) => { const workspace = document.querySelector<HTMLElement>(".canvas-workspace"); if (!workspace) return addCatalogItem(item); const bounds = workspace.getBoundingClientRect(); addCatalogItem(item, screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 })); };
-  const handleDrop = (event: DragEvent) => { event.preventDefault(); const image = Array.from(event.dataTransfer.files).find((file) => file.type.startsWith("image/")); if (image) { void image.arrayBuffer().then((buffer) => invoke<{ id: string }>("create_asset", { input: { projectId, originalName: image.name || "dropped-image.png", mediaType: image.type, bytes: Array.from(new Uint8Array(buffer)) } })).then((asset) => addImage(projectId, asset.id, screenToFlowPosition({ x: event.clientX, y: event.clientY }))); return; } const type = event.dataTransfer.getData("application/orbit-node"); const item = defaultCatalogRepository.getItemByType(type); if (item) addCatalogItem(item, screenToFlowPosition({ x: event.clientX, y: event.clientY })); };
+  const handleDrop = (event: DragEvent) => { event.preventDefault(); const image = Array.from(event.dataTransfer.files).find((file) => file.type.startsWith("image/")); if (image) { void image.arrayBuffer().then((buffer) => invoke<{ id: string }>("create_asset", { input: { projectId, originalName: image.name || "dropped-image.png", mediaType: image.type, bytes: Array.from(new Uint8Array(buffer)) } })).then((asset) => addImage(projectId, asset.id, screenToFlowPosition({ x: event.clientX, y: event.clientY }))); return; } const type = event.dataTransfer.getData("application/orbit-node"); const item = getCatalogItemByType(type); if (item) addCatalogItem(item, screenToFlowPosition({ x: event.clientX, y: event.clientY })); };
   const handlePaste = (event: ClipboardEvent) => { const image = Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/")); if (!image) return; event.preventDefault(); void image.arrayBuffer().then((buffer) => invoke<{ id: string }>("create_asset", { input: { projectId, originalName: image.name || "pasted-image.png", mediaType: image.type, bytes: Array.from(new Uint8Array(buffer)) } })).then((asset) => addImage(projectId, asset.id, screenToFlowPosition({ x: 240, y: 180 }))); };
 
-  return <AppShell activeSection="canvas" onNavigate={(section) => { window.location.hash = section === "home" ? "" : section === "canvas" ? `canvas/${encodeURIComponent(projectId)}` : section === "notes" ? `notes/${encodeURIComponent(projectId)}` : section === "calendar" ? `calendar/${encodeURIComponent(projectId)}` : section === "docs" ? `docs/${encodeURIComponent(projectId)}` : section; }}>
+  return <AppShell activeSection="canvas" onNavigate={(section) => { window.location.hash = section === "home" ? "" : section === "canvas" ? `canvas/${encodeURIComponent(projectId)}` : section === "calendar" ? `calendar/${encodeURIComponent(projectId)}` : section === "docs" ? `docs/${encodeURIComponent(projectId)}` : section; }}>
     <div className="canvas-layout">
       <LibraryPanel onAdd={addAtCenter} />
       <main className="canvas-main">
@@ -101,7 +101,7 @@ function CanvasEngine({ projectId, canvasId }: { projectId: string; canvasId?: s
 
 function ComponentInspector({ projectId, component, onSave, onDuplicate, onRemove }: { projectId: string; component: PersistedComponent; onSave: (projectId: string, component: PersistedComponent) => Promise<void>; onDuplicate: (projectId: string, component: PersistedComponent) => Promise<void>; onRemove: (projectId: string, componentId: string) => Promise<void> }) {
   const update = (field: "label" | "description", value: string) => void onSave(projectId, { ...component, [field]: value });
-  const icon = defaultCatalogRepository.getItemByType(component.componentType)?.icon ?? "shape";
+  const icon = getCatalogItemByType(component.componentType)?.icon ?? "shape";
   return <><section className="selected-node"><CatalogIcon icon={icon} className={`tone-${component.color}`} /><div><strong>{component.label}</strong><span>{component.componentType}</span></div></section><section className="property-group"><h2>General</h2><label>Label<input defaultValue={component.label} onBlur={(event) => update("label", event.target.value)} /></label><label>Description<input defaultValue={component.description} onBlur={(event) => update("description", event.target.value)} /></label><p className="component-port-summary">{component.ports.length} Ports tipados</p></section><section className="property-group"><h2>Position</h2><div className="dimensions"><label>X<input value={Math.round(component.x)} readOnly /></label><label>Y<input value={Math.round(component.y)} readOnly /></label></div></section><button type="button" className="duplicate-component-button" onClick={() => void onDuplicate(projectId, component)}>Duplicar Component <kbd>Ctrl+C / Ctrl+V</kbd></button><button type="button" className="delete-component-button" onClick={() => void onRemove(projectId, component.id)}>Apagar Component</button></>;
 }
 

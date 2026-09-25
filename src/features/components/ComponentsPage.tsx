@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { AppShell } from "../../shared/AppShell";
 import { isTauriAvailable } from "../../shared/tauri";
 import { CatalogIcon } from "../catalog/icons";
-import { defaultCatalogRepository } from "../catalog/repository";
+import { createCanvasCatalogRepository, defaultCatalogRepository } from "../catalog/repository";
 import { awsPreviewItems, awsServiceItems } from "../catalog/awsServices";
+import { useComponentLibraryStore } from "../catalog/application/componentLibraryStore";
 import type { CatalogItem } from "../catalog/types";
 import "./ComponentsPage.css";
 
@@ -19,22 +20,34 @@ export default function ComponentsPage() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [selected, setSelected] = useState<CatalogItem>(() => defaultCatalogRepository.getItemByType("api-server")!);
-  const [awsEnabled, setAwsEnabled] = useState(false);
   const [awsCatalogOpen, setAwsCatalogOpen] = useState(false);
   const [libraryKeys, setLibraryKeys] = useState<Set<string>>(() => new Set());
   const [isAdding, setIsAdding] = useState(false);
   const [libraryMessage, setLibraryMessage] = useState("");
-  const items = useMemo(() => defaultCatalogRepository.search(query).filter((item) => category === "All" || item.category === category), [query, category]);
+  const { libraries, loading: librariesLoading, load: loadLibraries, setAwsEnabled } = useComponentLibraryStore();
+  const awsEnabled = libraries.some((library) => library.id === "aws" && library.enabled);
+  const activeCatalog = useMemo(() => createCanvasCatalogRepository(awsEnabled), [awsEnabled]);
+  const items = useMemo(() => activeCatalog.search(query).filter((item) => category === "All" || item.category === category), [activeCatalog, query, category]);
   const featuredItems = featured.map((type) => defaultCatalogRepository.getItemByType(type)).filter((item): item is CatalogItem => Boolean(item));
   const choose = (item: CatalogItem) => setSelected(item);
 
   useEffect(() => {
     if (!isTauriAvailable()) return;
+    void loadLibraries();
     void invoke("initialize_local_profile")
       .then(() => invoke<PersonalLibraryItem[]>("list_personal_library"))
       .then((personalLibrary) => setLibraryKeys(new Set(personalLibrary.map((item) => item.sourceKey))))
       .catch(() => setLibraryMessage("Não foi possível carregar sua biblioteca local."));
-  }, []);
+  }, [loadLibraries]);
+
+  const toggleAws = async () => {
+    try {
+      await setAwsEnabled(!awsEnabled);
+      setLibraryMessage(awsEnabled ? "A coleção AWS foi ocultada da Library." : "A coleção AWS foi habilitada na Library.");
+    } catch (reason) {
+      setLibraryMessage(reason instanceof Error ? reason.message : "Não foi possível salvar a coleção AWS.");
+    }
+  };
 
   const addToLibrary = async (item: CatalogItem) => {
     if (libraryKeys.has(item.type)) {
@@ -64,7 +77,7 @@ export default function ComponentsPage() {
       window.location.hash = "";
       return;
     }
-    if (section === "canvas" || section === "notes" || section === "calendar" || section === "docs") {
+    if (section === "canvas" || section === "calendar" || section === "docs") {
       if (!isTauriAvailable()) {
         window.location.hash = "";
         return;
@@ -88,7 +101,7 @@ export default function ComponentsPage() {
         <h1 id="components-title">Components</h1><p className="components-subtitle">Blocos prontos para construir seus diagramas, arquiteturas e fluxos.</p>
         <nav className="component-filters" aria-label="Categorias de Components">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</nav>
         {!query && <section className="component-section"><div className="section-title"><h2>Featured</h2><button>See all →</button></div><div className="featured-grid">{featuredItems.map((item) => <ComponentCard key={item.type} item={item} selected={selected.type === item.type} onSelect={choose} onAdd={addToLibrary} inLibrary={libraryKeys.has(item.type)} featured />)}</div></section>}
-        {!query && <section className="aws-callout"><div><span className="aws-label">AWS ARCHITECTURE ICONS</span><h2>Serviços AWS locais</h2><p>{awsEnabled ? "A coleção está disponível na sua biblioteca global." : "Habilite a coleção quando quiser usar serviços AWS nos seus diagramas."}</p></div><button className={`aws-toggle ${awsEnabled ? "enabled" : ""}`} type="button" role="switch" aria-checked={awsEnabled} aria-label="Habilitar biblioteca AWS" onClick={() => setAwsEnabled((value) => !value)}><span aria-hidden="true" /></button></section>}
+        {!query && <section className="aws-callout"><div><span className="aws-label">AWS ARCHITECTURE ICONS</span><h2>Serviços AWS locais</h2><p>{awsEnabled ? "A coleção está disponível na sua biblioteca global." : "Habilite a coleção quando quiser usar serviços AWS nos seus diagramas."}</p></div><button className={`aws-toggle ${awsEnabled ? "enabled" : ""}`} type="button" role="switch" aria-checked={awsEnabled} aria-label="Habilitar biblioteca AWS" disabled={librariesLoading} onClick={() => void toggleAws()}><span aria-hidden="true" /></button></section>}
         {!query && awsEnabled && <section className="component-section aws-preview"><div className="section-title"><h2>AWS Architecture Icons</h2><button onClick={openAwsCatalog}>Ver todos os componentes AWS →</button></div><div className="component-grid">{awsPreviewItems.map((item) => <ComponentCard key={item.type} item={item} selected={selected.type === item.type} onSelect={choose} onAdd={addToLibrary} inLibrary={libraryKeys.has(item.type)} />)}</div></section>}
         <section className="component-section"><div className="section-title"><h2>{query ? "Resultados" : "All Components"}</h2><span>{items.length} Components</span></div><div className="component-grid">{items.map((item) => <ComponentCard key={item.type} item={item} selected={selected.type === item.type} onSelect={choose} onAdd={addToLibrary} inLibrary={libraryKeys.has(item.type)} />)}</div>{items.length === 0 && <p className="components-empty">Nenhum Component encontrado.</p>}</section>
         </>}

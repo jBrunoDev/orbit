@@ -1,4 +1,4 @@
-.calendar-page { min-width: 0; min-height: 100vh; background: var(--bg); color: var(--text); }
+.calendar-page { min-width: 0; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; background: var(--bg); color: var(--text); }
 .calendar-content { display: grid; gap: var(--s5); max-width: 1280px; margin: 0 auto; padding: var(--s6); }
 .calendar-titlebar { display: flex; justify-content: space-between; align-items: end; gap: var(--s5); }
 .calendar-eyebrow { margin: 0 0 var(--s2); color: var(--accent-strong); font-size: 11px; font-weight: 700; letter-spacing: .1em; }
@@ -21,6 +21,8 @@
 .calendar-add-entry p { margin: 0; color: var(--danger); font-size: 12px; }
 .calendar-selected-day, .calendar-day-view { padding: var(--s4); }
 .calendar-selected-day h2, .calendar-day-view h2 { margin: 0 0 var(--s3); font-size: 14px; text-transform: capitalize; }
+.calendar-selected-day { min-height: 0; }
+.calendar-selected-day .calendar-entry-list { max-height: 180px; overflow-y: auto; padding-right: var(--s1); }
 .calendar-entry-list { display: grid; gap: var(--s2); }
 .calendar-entry-list > button { display: grid; gap: 3px; border: 1px solid var(--subtle); border-radius: 8px; background: var(--side); color: var(--text); padding: var(--s2) var(--s3); text-align: left; cursor: pointer; }
 .calendar-entry-list > button.selected { border-color: var(--accent-strong); }

@@ -10,6 +10,7 @@ type CalendarEntry = { id: string; projectId: string; entryDate: string; content
 const weekday = new Intl.DateTimeFormat("pt-BR", { weekday: "short" });
 const dayLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" });
 const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" });
+const upcomingLabel = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -56,13 +57,16 @@ function CalendarEntries({ entries, selectedDate, onSelectDate }: { entries: Cal
   return <div className="calendar-entry-list">{entries.map((entry) => <button type="button" key={entry.id} className={entry.entryDate === selectedDate ? "selected" : ""} onClick={() => onSelectDate(entry.entryDate)}><time>{entry.entryDate === selectedDate ? "Dia selecionado" : parseDate(entry.entryDate).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</time><span>{entry.content}</span></button>)}</div>;
 }
 
-export default function CalendarPage({ projectId }: { projectId: string }) {
+export default function CalendarPage({ projectId = "calendar" }: { projectId?: string }) {
   const [view, setView] = useState<CalendarView>("month");
   const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()));
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
+  const [upcomingEntries, setUpcomingEntries] = useState<CalendarEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
+  const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const today = useMemo(() => dateKey(new Date()), []);
   const selected = useMemo(() => parseDate(selectedDate), [selectedDate]);
   const range = useMemo(() => visibleRange(selected, view), [selected, view]);
   const periodDays = useMemo(() => datesBetween(range.start, range.end), [range]);
@@ -83,6 +87,25 @@ export default function CalendarPage({ projectId }: { projectId: string }) {
       .finally(() => setLoading(false));
   }, [projectId, range.end, range.start]);
 
+  useEffect(() => {
+    if (!isTauriAvailable()) {
+      setUpcomingEntries([]);
+      setUpcomingLoading(false);
+      return;
+    }
+    setUpcomingLoading(true);
+    void invoke<CalendarEntry[]>("list_calendar_entries", {
+      projectId,
+      startDate: today,
+      endDate: "9999-12-31",
+    })
+      .then(setUpcomingEntries)
+      .catch((reason) =>
+        setMessage(reason instanceof Error ? reason.message : "Não foi possível carregar os próximos compromissos."),
+      )
+      .finally(() => setUpcomingLoading(false));
+  }, [projectId, today]);
+
   const addEntry = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft.trim()) return;
@@ -91,6 +114,13 @@ export default function CalendarPage({ projectId }: { projectId: string }) {
       const entry = await invoke<CalendarEntry>("create_calendar_entry", { input: { projectId, entryDate: selectedDate, content: draft } });
       setDraft("");
       if (entry.entryDate >= dateKey(range.start) && entry.entryDate <= dateKey(range.end)) setEntries((current) => [...current, entry]);
+      if (entry.entryDate >= today) {
+        setUpcomingEntries((current) =>
+          [...current, entry].sort(
+            (a, b) => a.entryDate.localeCompare(b.entryDate) || a.createdAt - b.createdAt,
+          ),
+        );
+      }
     } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Não foi possível salvar o planejamento."); }
   };
 
@@ -99,7 +129,7 @@ export default function CalendarPage({ projectId }: { projectId: string }) {
   const monthDays = datesBetween(monthStart, monthEnd);
   const selectedEntries = entriesByDate[selectedDate] ?? [];
 
-  return <AppShell activeSection="calendar" onNavigate={(section) => { window.location.hash = section === "home" ? "" : section === "canvas" ? `canvas/${encodeURIComponent(projectId)}` : section === "notes" ? `notes/${encodeURIComponent(projectId)}` : section === "calendar" ? `calendar/${encodeURIComponent(projectId)}` : section === "docs" ? `docs/${encodeURIComponent(projectId)}` : section; }}>
+  return <AppShell activeSection="calendar" onNavigate={(section) => { window.location.hash = section === "home" ? "" : section === "canvas" ? `canvas/${encodeURIComponent(projectId)}` : section === "calendar" ? `calendar/${encodeURIComponent(projectId)}` : section === "docs" ? `docs/${encodeURIComponent(projectId)}` : section; }}>
     <main className="calendar-page">
       <section className="calendar-content" aria-labelledby="calendar-title">
         <header className="calendar-titlebar">
@@ -109,7 +139,7 @@ export default function CalendarPage({ projectId }: { projectId: string }) {
         <div className="calendar-controls" aria-label="Modo de visualização"><div role="group" aria-label="Visualização do Calendar">{(["day", "week", "month"] as CalendarView[]).map((option) => <button key={option} type="button" className={view === option ? "active" : ""} onClick={() => setView(option)}>{option === "day" ? "Dia" : option === "week" ? "Semana" : "Mês"}</button>)}</div><strong>{view === "month" ? monthLabel.format(selected) : dayLabel.format(selected)}</strong></div>
         <section className="calendar-planner" aria-label="Planejamento">
           <form className="calendar-add-entry" onSubmit={(event) => void addEntry(event)}><label htmlFor="calendar-entry">Planejar para {dayLabel.format(selected)}<textarea id="calendar-entry" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ex.: revisar a arquitetura, estudar para a prova..." /></label><button type="submit" disabled={!draft.trim()}>Adicionar ao dia</button>{message && <p role="alert">{message}</p>}</form>
-          <aside className="calendar-selected-day"><h2>{dayLabel.format(selected)}</h2><CalendarEntries entries={selectedEntries} selectedDate={selectedDate} onSelectDate={setSelectedDate} /></aside>
+          <aside className="calendar-selected-day" aria-label="Próximos compromissos"><h2>Próximos compromissos</h2>{upcomingLoading ? <p className="calendar-empty">Carregando compromissos...</p> : upcomingEntries.length ? <div className="calendar-entry-list">{upcomingEntries.map((entry) => <button type="button" key={entry.id} className={entry.entryDate === selectedDate ? "selected" : ""} onClick={() => setSelectedDate(entry.entryDate)}><time>{upcomingLabel.format(parseDate(entry.entryDate))}</time><span>{entry.content}</span></button>)}</div> : <p className="calendar-empty">Nenhum compromisso futuro.</p>}</aside>
         </section>
         {loading ? <div className="calendar-state">Carregando planejamento...</div> : view === "day" ? <section className="calendar-day-view"><h2>{dayLabel.format(selected)}</h2><CalendarEntries entries={selectedEntries} selectedDate={selectedDate} onSelectDate={setSelectedDate} /></section> : view === "week" ? <section className="calendar-week-view" aria-label="Planejamento da semana">{periodDays.map((day) => { const key = dateKey(day); return <article key={key} className={key === selectedDate ? "selected" : ""}><button type="button" onClick={() => setSelectedDate(key)}><strong>{weekday.format(day)}</strong><span>{day.getDate()}</span></button><CalendarEntries entries={entriesByDate[key] ?? []} selectedDate={selectedDate} onSelectDate={setSelectedDate} /></article>; })}</section> : <section className="calendar-month-view" aria-label="Planejamento do mês"><div className="calendar-weekdays">{Array.from({ length: 7 }, (_, day) => <span key={day}>{weekday.format(addDays(weekStart(new Date(2024, 0, 1)), day)).replace(".", "")}</span>)}</div><div className="calendar-month-grid">{monthDays.map((day) => { const key = dateKey(day); const outsideMonth = day.getMonth() !== selected.getMonth(); return <article key={key} className={`${key === selectedDate ? "selected" : ""} ${outsideMonth ? "outside" : ""}`}><button type="button" onClick={() => setSelectedDate(key)} aria-label={`Selecionar ${dayLabel.format(day)}`}><span>{day.getDate()}</span></button>{(entriesByDate[key] ?? []).slice(0, 3).map((entry) => <button key={entry.id} type="button" className="calendar-entry-chip" onClick={() => setSelectedDate(key)}>{entry.content}</button>)}</article>; })}</div></section>}
       </section>
